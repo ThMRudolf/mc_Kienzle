@@ -1,0 +1,130 @@
+---
+title: "mc_kienzle"
+author: "Thomas M. Rudolf"
+date: "2024-03-26"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(gt)
+library(ggplot2)
+library(MASS)
+library(patchwork)
+library(R2OpenBUGS)
+library(rjags)
+library(R2jags)
+library(patchwork)
+library(tidyverse)
+```
+
+Kienzle Model for cutting torque:
+
+$F_{ci} = k_c b h^{1-m_c} = a_p f_z^{1-m_c} sin(\kappa)^{m_c} k_{c1.1} sin(\phi + (k-1) \frac{360}{z})^{1-m_c}$
+
+$M_c = \sum_1^z{F_{ci} r_{tool}}$
+
+
+
+$a_p$ cutting depth
+
+$f_z$ feed per cutting edge
+
+$\kappa$ main tool angle
+
+$z$ number of cutting edges
+
+$k$ cutting edgre id : 1..z
+
+The value of $m_c$ and $k_{c1.1}$ are material specific values and have to be identified. A mean value 0.25. One will take a #beta distribution# to simulate the resulting torque for different machining situations. The machining are varied in cutting depth $a_p$, feed per tooth $f_z$ and different entrance angles $\phi$.
+
+
+
+```{r read in milling data}
+process_mill <- read.csv("..\\data\\Trace_0622_172347.csv")
+iqSp <- process_mill$X..Nck..SD.nckServoDataActCurr32..u1..4.
+velSp <- process_mill$X..Nck..SD.nckServoDataActVelMot32..u1..4./36 * 0.1047198 # rad/s
+time <- process_mill$time
+dtime <- diff(time)
+dtime <- append(dtime, 0.002)
+phi <-cumsum(velSp)*0.002
+N <- length(iqSp)
+raund_count = 0
+km <- 1.3
+# limiting phi to 2*pi
+for(k in 1:N){
+  if(phi[k]>2*pi){
+    phi[k:N] <- phi[k:N] -2*pi
+  }
+}
+```
+
+```{r some nice plots}
+df_plots <- data.frame(Mc = iqSp*km,
+                       phi = phi, 
+                       time = time)
+ggplot(df_plots, aes(x = phi*180/pi, y = Mc)) + 
+  geom_point()+
+  coord_polar()
+ggplot(df_plots, aes(x = phi*180/pi, y = Mc)) + 
+  geom_point()
+
+df_plots_arranged <- arrange(df_plots, phi, by_group = TRUE)
+```
+
+
+```{r prep data for jags}
+ap = 1.0  # cutting depth in mm
+fz = 0.15 # feed per tooth in mm
+kappa = 5/180*pi # main angle of tool insert in degree
+z = 4     # number of cutting edges [2, 3, 4]
+rtool = 40/2# tool radius in mm
+m_alpha = 0.0 
+sd_alpha = 0.01
+m_beta = 0.0 
+sd_beta = 0.01
+
+
+
+data_mill <- list("k" = N, 
+                  "Mc" = df_plots_arranged$Mc,
+                  "phi" = df_plots_arranged$phi, 
+                  "ap" = ap, 
+                  "fz" = fz, 
+                  "kappa" = kappa, 
+                  "z" = z,
+                  "rtool" = rtool, 
+                  "m_alpha" = m_alpha, 
+                  "sd_alpha" = sd_alpha, 
+                  "m_beta" = m_beta, 
+                  "sd_beta" = sd_beta 
+                  )
+inits <- function(){list(mc=0.25, kc1=1e3)}
+parameters <- c("mc", "kc1", "sumFc")
+
+```
+
+```{r definition of jags model}
+cat("model{
+for (i in 1:k){
+  sumFc[i] <- 0
+  for(k in 1:z){
+    dummy <- ap * pow(fz, (1-mc)) * pow(sin(kappa), mc) * kc1 * pow(sin(phi[i] + (k-1)*2*pi/z), (1-mc))
+    sumFc[i] <- sumFc[i] + dummy
+  }
+  Mc[i] ~ sumFc[i] * rtool
+}
+
+mc ~ dbeta(alpha_mc,beta_mc)
+alpha_mc ~ dnorm(m_alpha, 1/sd_alpha)
+beta_mc ~ dnorm(m_beta, 1/sd_beta)
+  } ", file="jags_kienzle.txt")
+
+```
+
+
+```{r run jags model}
+jags_kienzle <- jags(data_mill, inits, parameters, model.file="jags_kienzle.txt", 
+                      n.iter=5000, n.chains=20, n.burnin=1000)
+```
+
