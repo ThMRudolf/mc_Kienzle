@@ -5,7 +5,7 @@ date: "2024-03-26"
 output: html_document
 ---
 
-```{r setup, include=FALSE}
+```{r setup, include=FALSE, echo = TRUE}
 knitr::opts_chunk$set(echo = TRUE)
 library(gt)
 library(ggplot2)
@@ -24,8 +24,6 @@ $F_{ci} = k_c b h^{1-m_c} = a_p f_z^{1-m_c} sin(\kappa)^{m_c} k_{c1.1} sin(\phi 
 
 $M_c = \sum_1^z{F_{ci} r_{tool}}$
 
-
-
 $a_p$ cutting depth
 
 $f_z$ feed per cutting edge
@@ -38,7 +36,47 @@ $k$ cutting edgre id : 1..z
 
 The value of $m_c$ and $k_{c1.1}$ are material specific values and have to be identified. A mean value 0.25. One will take a #beta distribution# to simulate the resulting torque for different machining situations. The machining are varied in cutting depth $a_p$, feed per tooth $f_z$ and different entrance angles $\phi$.
 
+## Theoretical model, discussion of impact of varying material parameters $m_c$ and $k_{c1.1}$
 
+$m_c$ has a mean of 0.25 and a variance of 0.01.
+
+all other parameters are constant.
+
+```{r usefull fucntion}
+# moving average filter
+maf <- function(in_signal, n){
+  N <- length(in_signal)
+  maf_signal <- rep(0, N)
+  for(k1 in 1:n){
+    maf_signal[k1] <- mean(in_signal[1:k1])
+  }
+  for(k2 in (n+1):N){
+    maf_signal[k2] <- mean(in_signal[(k2-n+1):k2])
+
+  }
+  return(maf_signal)
+}
+
+# find max Mc in 2pi
+max_Mc <- function(id_reduce, Mc, phi){
+  # find max in intevall of 2pi
+  NMax <- length(id_reduce)
+  idx <- 1
+  k3_old <- 1
+  McMax <- NULL
+  phiMcMax <- NULL
+  for(k3 in id_reduce){
+      McMax <- append(McMax, max(Mc[k3_old:k3]))
+    
+      ii <- which(McMax[idx]==Mc[k3_old:k3])
+      phiMcMax <- append(phiMcMax, phi[k3_old-1+ii[1]])
+      k3_old <- k3
+      idx <- idx+1
+  }
+  df <- data.frame(McMax, phiMcMax)
+  return(df)
+}
+```
 
 ```{r read in milling data}
 process_mill <- read.csv("..\\data\\Trace_0622_172347.csv")
@@ -51,27 +89,90 @@ phi <-cumsum(velSp)*0.002
 N <- length(iqSp)
 raund_count = 0
 km <- 1.3
+Mc <- iqSp * km
+id_reduce <- NULL
+
+
+#max_Mc
+# evaluation data in process: 4s to 13s
+eval_times <- c(4, 13)
+eval_idx <- which((time>=eval_times[1]) & (time<=eval_times[2]))
+df2EvalData <- data.frame(iqSp = iqSp[eval_idx], 
+                          velSp = velSp[eval_idx],
+                          time = time[eval_idx], 
+                          phi = phi[eval_idx], 
+                          Mc = Mc[eval_idx])
+
 # limiting phi to 2*pi
+N <- length(iqSp[eval_idx])
+phi <- phi[eval_idx]
 for(k in 1:N){
   if(phi[k]>2*pi){
     phi[k:N] <- phi[k:N] -2*pi
+    id_reduce <- append(id_reduce, k)
   }
 }
+dfMcMax <- max_Mc(id_reduce, Mc[eval_idx], phi[eval_idx])
 ```
 
 ```{r some nice plots}
-df_plots <- data.frame(Mc = iqSp*km,
-                       phi = phi, 
-                       time = time)
+df_plots <- df2EvalData |> mutate( mafMc02 = maf(Mc, 7), 
+                                   mafMc10 = maf(Mc, 30))
 ggplot(df_plots, aes(x = phi*180/pi, y = Mc)) + 
   geom_point()+
   coord_polar()
 ggplot(df_plots, aes(x = phi*180/pi, y = Mc)) + 
   geom_point()
+ggplot(df_plots, aes(x = time, y = Mc)) + 
+  geom_point() +
+  geom_line(aes(x=time, mafMc02), color="red") +
+  geom_line(aes(x=time, mafMc10), color="blue")
+
+
 
 df_plots_arranged <- arrange(df_plots, phi, by_group = TRUE)
+
+## max values of Mc
+dfMcMax <- dfMcMax |> mutate(mafMcMax=maf(McMax, 10))
+ggplot(dfMcMax, aes(x=phiMcMax, y=McMax))+
+  geom_line()+
+  geom_line(aes(x=phiMcMax, y=mafMcMax), color="red")
 ```
 
+```{r beta distribution alpha and beta by mean and varianz, echo = TRUE}
+beta_dist_param <- function(m, var){
+  alpha <- m^2*(1-m)/var - m
+  beta <- alpha * (1-m)/m
+  param <- data.frame(alpha, beta)
+  return(param)
+}
+
+
+beta_dist_mc <- beta_dist_param(0.25, 0.1^2)
+beta_dist_mc
+
+beta_dist_kc <- beta_dist_param(1200, 10^2)
+beta_dist_kc
+
+# test the result
+N <- 1000
+
+x = seq(0, 1, length.out=N)
+xnorm = seq(200, 2000, length.out=N)
+m_kc <- 1200
+sd_kc <- 50
+beta_init_mc <- dbeta(x, beta_dist_mc$alpha, beta_dist_mc$beta)
+norm_init_kc <- dnorm(xnorm, m_kc, sd_kc)
+df <- data.frame(x = x,
+                 xnorm = xnorm,
+                 beta_init_mc = beta_init_mc,
+                 norm_init_kc = norm_init_kc)
+
+ggplot(df, aes(x=x, y=beta_init_mc)) +
+  geom_line()
+ggplot(df, aes(x=xnorm, y=norm_init_kc)) +
+  geom_line()
+```
 
 ```{r prep data for jags}
 ap = 1.0  # cutting depth in mm
@@ -79,52 +180,51 @@ fz = 0.15 # feed per tooth in mm
 kappa = 5/180*pi # main angle of tool insert in degree
 z = 4     # number of cutting edges [2, 3, 4]
 rtool = 40/2# tool radius in mm
-m_alpha = 0.0 
-sd_alpha = 0.01
-m_beta = 0.0 
-sd_beta = 0.01
+alpha_mc = beta_dist_mc$alpha
+beta_mc = beta_dist_mc$alpha
+m_kc = m_kc
+sd_kc = sd_kc
 
 
 
-data_mill <- list("k" = N, 
-                  "Mc" = df_plots_arranged$Mc,
-                  "phi" = df_plots_arranged$phi, 
+
+data_mill <- list("k" = length(dfMcMax$McMax), 
+                  "Mc" = dfMcMax$McMax,
                   "ap" = ap, 
                   "fz" = fz, 
                   "kappa" = kappa, 
-                  "z" = z,
-                  "rtool" = rtool, 
-                  "m_alpha" = m_alpha, 
-                  "sd_alpha" = sd_alpha, 
-                  "m_beta" = m_beta, 
-                  "sd_beta" = sd_beta 
+                  #"alpha_mc" = alpha_mc, 
+                  #"beta_mc" = beta_mc, 
+                  "m_kc" = m_kc, 
+                  "sd_kc" = sd_kc 
                   )
-inits <- function(){list(mc=0.25, kc1=1e3)}
-parameters <- c("mc", "kc1", "sumFc")
+inits <- function(){list(mc=0.25, kc1=1.2e3)}
+#parameters <- c("mc", "kc1", "mc_estim", "kc1_estim")
+parameters <- c("mc", "mc_estim")
 
 ```
 
 ```{r definition of jags model}
 cat("model{
+# log likelihood amplitud of cutting torque
 for (i in 1:k){
-  sumFc[i] <- 0
-  for(k in 1:z){
-    dummy <- ap * pow(fz, (1-mc)) * pow(sin(kappa), mc) * kc1 * pow(sin(phi[i] + (k-1)*2*pi/z), (1-mc))
-    sumFc[i] <- sumFc[i] + dummy
-  }
-  Mc[i] ~ sumFc[i] * rtool
+    mc_estim[i] ~ dnorm(mc[i], tau_mc)
+    #kc_estim[i] ~ dnorm(kc1[i], tau_kc)
+    mc[i] <- (log(Mc[i]-log(ap*fz*kc1)))/(log(sin(kappa)/fz))
+    #kc1[i] <- Mc[i]/(ap*pow(fz, (1-mc[i]))*pow(sin(kappa), mc[i]))
 }
+# mc ~ dbeta(alpha_mc, beta_mc)
+# alpha_mc  ~ dnorm(alpha_mc, 1.0E-4)
+# beta_mc ~ dnorm(beta_mc, 1.0E-4)
+tau_mc ~ dgamma(0.001,0.001)
+tau_kc <- 1/pow(sd_kc,2)
+kc1 ~ dnorm(m_kc,1/pow(sd_kc,2))
 
-mc ~ dbeta(alpha_mc,beta_mc)
-alpha_mc ~ dnorm(m_alpha, 1/sd_alpha)
-beta_mc ~ dnorm(m_beta, 1/sd_beta)
   } ", file="jags_kienzle.txt")
 
 ```
-
 
 ```{r run jags model}
 jags_kienzle <- jags(data_mill, inits, parameters, model.file="jags_kienzle.txt", 
                       n.iter=5000, n.chains=20, n.burnin=1000)
 ```
-

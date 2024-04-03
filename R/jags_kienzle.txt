@@ -1,0 +1,16 @@
+model{
+# log likelihood amplitud of cutting torque
+for (i in 1:k){
+    mc_estim[i] ~ dnorm(mc[i], tau_mc)
+    #kc_estim[i] ~ dnorm(kc1[i], tau_kc)
+    mc[i] <- (log(Mc[i]-log(ap*fz*kc1)))/(log(sin(kappa)/fz))
+    #kc1[i] <- Mc[i]/(ap*pow(fz, (1-mc[i]))*pow(sin(kappa), mc[i]))
+}
+# mc ~ dbeta(alpha_mc, beta_mc)
+# alpha_mc  ~ dnorm(alpha_mc, 1.0E-4)
+# beta_mc ~ dnorm(beta_mc, 1.0E-4)
+tau_mc ~ dgamma(0.001,0.001)
+tau_kc <- 1/pow(sd_kc,2)
+kc1 ~ dnorm(m_kc,1/pow(sd_kc,2))
+
+  } 
