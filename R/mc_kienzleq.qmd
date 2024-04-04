@@ -199,11 +199,11 @@ ggplot(df, aes(x=xnorm, y=norm_init_kc)) +
 ```
 
 ```{r prep data for jags}
-ap = 1.0  # cutting depth in mm
-fz = 0.15 # feed per tooth in mm
-kappa = 5/180*pi # main angle of tool insert in degree
+ap = 0.001  # cutting depth in m
+fz = 0.00015 # feed per tooth in m
+kappa = 105/180*pi # main angle of tool insert in degree
 z = 4     # number of cutting edges [2, 3, 4]
-rtool = 40/2# tool radius in mm
+rtool = 0.040/2# tool radius in m
 alpha_mc = beta_dist_mc$alpha
 beta_mc = beta_dist_mc$alpha
 m_kc = m_kc
@@ -217,10 +217,9 @@ data_mill <- list("k" = length(dfMcMax$McMax),
                   "ap" = ap, 
                   "fz" = fz, 
                   "kappa" = kappa, 
-                  #"alpha_mc" = alpha_mc, 
-                  #"beta_mc" = beta_mc, 
                   "m_kc" = m_kc, 
-                  "sd_kc" = sd_kc 
+                  "sd_kc" = sd_kc,
+                  "sd_mc" = 0.1 
                   )
 inits <- function(){list(mc=0.25, kc1=1.2e3)}
 #parameters <- c("mc", "kc1", "mc_estim", "kc1_estim")
@@ -228,27 +227,62 @@ parameters <- c("mc", "mc_estim")
 
 ```
 
-```{r definition of jags model}
+```{r definition of jags model to identify mc}
 cat("model{
 # log likelihood amplitud of cutting torque
 for (i in 1:k){
     mc_estim[i] ~ dnorm(mc[i], tau_mc)
-    #kc_estim[i] ~ dnorm(kc1[i], tau_kc)
-    mc[i] <- (log(Mc[i]-log(ap*fz*kc1)))/(log(sin(kappa)/fz))
-    #kc1[i] <- Mc[i]/(ap*pow(fz, (1-mc[i]))*pow(sin(kappa), mc[i]))
+    mc[i] <-  (log(Mc[i]-log(ap*fz*kc1)))/(log(sin(kappa)/fz))
 }
-# mc ~ dbeta(alpha_mc, beta_mc)
-# alpha_mc  ~ dnorm(alpha_mc, 1.0E-4)
-# beta_mc ~ dnorm(beta_mc, 1.0E-4)
-tau_mc ~ dgamma(0.001,0.001)
 tau_kc <- 1/pow(sd_kc,2)
-kc1 ~ dnorm(m_kc,1/pow(sd_kc,2))
+tau_mc <- 1/pow(sd_mc,2)
+kc1 ~ dnorm(m_kc,tau_kc)
 
-  } ", file="jags_kienzle.txt")
+  } ", file="jags_kienzle_mc.txt")
 
 ```
 
 ```{r run jags model}
-jags_kienzle <- jags(data_mill, inits, parameters, model.file="jags_kienzle.txt", 
+jags_kienzle_mc <- jags(data_mill, inits, parameters, model.file="jags_kienzle_mc.txt", 
                       n.iter=5000, n.chains=20, n.burnin=1000)
 ```
+
+```{r}
+data_mill_kc11 <- list("k" = length(dfMcMax$McMax), 
+                  "Mc" = dfMcMax$McMax,
+                  "ap" = ap, 
+                  "fz" = fz, 
+                  "kappa" = kappa, 
+                  "alpha_mc" = alpha_mc, 
+                  "beta_mc" = beta_mc, 
+                  "sd_kc" = sd_kc
+                  )
+inits_kc11 <- function(){list(mc=0.25, kc1=1.2e3)}
+#parameters <- c("mc", "kc1", "mc_estim", "kc1_estim")
+parameters_kc11 <- c("ddd")    #c("kc1", "kc_estim")
+```
+
+
+```{r definition of jags model to identify kc11}
+cat("model{
+# log likelihood amplitud of cutting torque
+for (i in 1:k){
+    kc_estim[i] ~ dnorm(kc1[i], tau_kc)
+    kc1[i] <- Mc[i]/(ap*pow(fz, (1-mc))*pow(sin(kappa), mc))
+  }
+mc ~ dbeta(alpha_mc, beta_mc)
+sd_mc <- 0.1
+tau_mc <- 1/pow(sd_mc, 2)
+alpha_mc  ~ dnorm(alpha_mc, tau_mc)
+beta_mc ~ dnorm(beta_mc, tau_mc)
+tau_kc <- 1/pow(sd_kc,2)
+
+  } ", file="jags_kienzle_kc11.txt")
+
+```
+
+```{r run jags model for kc11}
+jags_kienzle_kc11 <- jags(data_mill_kc11, inits_kc11, parameters_kc11, model.file="jags_kienzle_kc11.txt", 
+                      n.iter=5000, n.chains=20, n.burnin=1000)
+```
+
