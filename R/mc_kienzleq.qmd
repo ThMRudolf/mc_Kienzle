@@ -40,7 +40,11 @@ The value of $m_c$ and $k_{c1.1}$ are material specific values and have to be id
 
 $m_c$ has a mean of 0.25 and a variance of 0.01.
 
+$k_{c1,1}$ has an mean of 1200 and a variance of 100.
+
 all other parameters are constant.
+
+first, some useful functions are defined: moving average filter allows filtering the N values, max_Mc returns the maximal value of the signal $M_c$ in one revolution (360°)
 
 ```{r usefull fucntion}
 # moving average filter
@@ -78,6 +82,18 @@ max_Mc <- function(id_reduce, Mc, phi){
 }
 ```
 
+The data are imported. The important signals are the torque generating current of the main spindle, the rotational velocity of the main spindle and the time. Based on this data the the toque and the angular position can be calculated.
+
+\$k_m\$: motor torque constant
+
+$I_q$: torque generating current
+
+$M_c$: spindle torque
+
+\$M_c (t) = k_m I_q \$
+
+The examples are plotted for ilustrative purpose
+
 ```{r read in milling data}
 #process_mill <- read.csv("..\\data\\Trace_0622_172347.csv")
 process_mill <- read.csv("..\\data\\Trace_0331_150521.csv")
@@ -112,6 +128,10 @@ ggplot(df_plot_data_complete) +
 
 ```
 
+For further analysis, only the cutting process is relevant. Therefore the time span in of the cutting process is separated. The result is plotted.
+
+Since the amplitude is the relevant value to evaluate, the signals are analysed per \$0\$\$ to \$2\pi\$\$ interval and the maximal value of $M_c$ is stored.
+
 ```{r define value range to evaluate}
 id_reduce <- NULL
 
@@ -137,7 +157,6 @@ for(k in 1:N){
 }
 dfMcMax <- max_Mc(id_reduce, Mc[eval_idx], phi[eval_idx])
 ```
-
 
 ```{r some nice plots}
 df_plots <- df2EvalData |> mutate( mafMc02 = maf(Mc, 7), 
@@ -262,7 +281,6 @@ inits_kc11 <- function(){list(mc=0.25, kc1=1.2e3)}
 parameters_kc11 <- c("ddd")    #c("kc1", "kc_estim")
 ```
 
-
 ```{r definition of jags model to identify kc11}
 cat("model{
 # log likelihood amplitud of cutting torque
@@ -285,4 +303,3 @@ tau_kc <- 1/pow(sd_kc,2)
 jags_kienzle_kc11 <- jags(data_mill_kc11, inits_kc11, parameters_kc11, model.file="jags_kienzle_kc11.txt", 
                       n.iter=5000, n.chains=20, n.burnin=1000)
 ```
-
