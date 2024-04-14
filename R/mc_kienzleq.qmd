@@ -46,7 +46,22 @@ all other parameters are constant.
 
 first, some useful functions are defined: moving average filter allows filtering the N values, max_Mc returns the maximal value of the signal $M_c$ in one revolution (360°)
 
-```{r usefull fucntion}
+```{r some usefull functions}
+# limiting phi to 2*pi
+lim22pi <- function(phi){
+N <- length(phi)
+id_reduce <- NULL
+for(k in 1:N){
+    if(phi[k]>2*pi){
+      phi[k:N] <- phi[k:N] -2*pi
+      id_reduce <- append(id_reduce, k)
+    }
+}
+
+  listLim22pi <- list(phi, id_reduce)
+  return(listLim22pi)
+}
+
 # moving average filter
 maf <- function(in_signal, n){
   N <- length(in_signal)
@@ -82,6 +97,51 @@ max_Mc <- function(id_reduce, Mc, phi){
 }
 ```
 
+
+```{r theoretical model by Kienzle}
+ap <- 1  # cutting depth in m
+fz <- 0.15 # feed per tooth in m
+kappa <- 105/180*pi # main angle of tool insert in degree
+z <- 4     # number of cutting edges [2, 3, 4]
+rtool <- 40/2# tool radius in m
+mc <- 0.25
+kc11 <- 1200
+ae <- 30
+SSpinlde <- 2109 # spindle speed in rpm
+omegaSpindle <- SSpinlde/60*2*pi # spindle speed in rad/s
+dt <- 0.0002
+
+time <- seq(dt,dt*300*2, dt)
+NSamples <- length(time)
+
+cum_sin_phi <- rep(0, NSamples)
+if(ae<=rtool){
+  phi_out <- acos((rtool-ae)/rtool)
+}
+if(ae>rtool){
+  phi_out <- pi/2 + asin((ae-rtool)/rtool)
+}
+phi_in <- 0 
+phi <- omegaSpindle*time
+listPhi <-lim22pi(phi)
+phi <- listPhi[[1]]
+for(time_idx in 1:NSamples){
+  for(cutting_edge_idx in 1:z){
+    sin_arg <- phi[time_idx] - ((2*pi)/z) * (cutting_edge_idx -1)
+    add_sin_comp <- sin(sin_arg)
+    cond <- (sin_arg >phi_in) && (sin_arg < phi_out)
+    cum_sin_phi[time_idx] <- cum_sin_phi[time_idx] + ifelse(cond, add_sin_comp, 0)
+  }
+}
+AmpMc <- ap*fz^(1-mc)*(sin(kappa)^mc)*kc11
+dfModelKienzle <- data.frame(t = time,  Mc = AmpMc*cum_sin_phi, phi)
+ggplot(dfModelKienzle, aes(x=phi, y=Mc)) +
+  geom_line()
+
+```
+
+
+
 The data are imported. The important signals are the torque generating current of the main spindle, the rotational velocity of the main spindle and the time. Based on this data the the toque and the angular position can be calculated.
 
 \$k_m\$: motor torque constant
@@ -95,14 +155,16 @@ $M_c$: spindle torque
 The examples are plotted for ilustrative purpose
 
 ```{r read in milling data}
-#process_mill <- read.csv("..\\data\\Trace_0622_172347.csv")
-process_mill <- read.csv("..\\data\\Trace_0331_150521.csv")
+process_mill <- read.csv("..\\data\\Trace_0622_172347.csv")
+#process_mill <- read.csv("..\\data\\Trace_0331_150521.csv")
 iqSp <- process_mill$X..Nck..SD.nckServoDataActCurr32..u1..4.
 velSp <- process_mill$X..Nck..SD.nckServoDataActVelMot32..u1..4./36 * 0.1047198 # rad/s
 time <- process_mill$time
 dtime <- diff(time)
 dtime <- append(dtime, 0.002)
 phi <-cumsum(velSp)*0.002
+df_phi <- lim22pi(phi)
+phi <- df_phi$
 N <- length(iqSp)
 raund_count = 0
 km <- 1.3
@@ -146,15 +208,7 @@ df2EvalData <- data.frame(iqSp = iqSp[eval_idx],
                           phi = phi[eval_idx], 
                           Mc = Mc[eval_idx])
 
-# limiting phi to 2*pi
-N <- length(iqSp[eval_idx])
-phi <- phi[eval_idx]
-for(k in 1:N){
-  if(phi[k]>2*pi){
-    phi[k:N] <- phi[k:N] -2*pi
-    id_reduce <- append(id_reduce, k)
-  }
-}
+
 dfMcMax <- max_Mc(id_reduce, Mc[eval_idx], phi[eval_idx])
 ```
 
@@ -182,10 +236,7 @@ ggplot(dfMcMax, aes(x=phiMcMax, y=McMax))+
   geom_line(aes(x=phiMcMax, y=mafMcMax), color="red")
 ```
 
-The value of $m_c$ is suposed to be beta distributed. To calculate the values $\alpha$ and $\beta$ based on the assumption that the mean value of $m_c$ is 0.25 and the standard deviation of 0.1 considering the characteristics of a beta distribution.
-{\displaystyle \operatorname {E} [X]={\frac {\alpha }{\alpha +\beta }}\!}
-{\displaystyle \operatorname {var} [X]={\frac {\alpha \beta }{(\alpha +\beta )^{2}(\alpha +\beta +1)}}\!}
-
+The value of $m_c$ is suposed to be beta distributed. To calculate the values $\alpha$ and $\beta$ based on the assumption that the mean value of $m_c$ is 0.25 and the standard deviation of 0.1 considering the characteristics of a beta distribution. {\displaystyle \operatorname {E} \[X\]={\frac {\alpha }{\alpha +\beta }}!} {\displaystyle \operatorname {var} \[X\]={\frac {\alpha \beta }{(\alpha +\beta )^{2}(\alpha +\beta +1)}}!}
 
 ```{r beta distribution alpha and beta by mean and varianz, echo = TRUE}
 beta_dist_param <- function(m, var){
@@ -250,7 +301,9 @@ inits <- function(){list(mc=0.25, kc1=1.2e3)}
 parameters <- c("mc", "mc_estim")
 
 ```
+the distribiution $m_c[i] f(m_c|k_{c1.1})$: the value for $k_{c1.1}$ is asummed as a normal distribution with the mentioned  values as start values. 
 
+$m_c[1] = \frac{log(Mc[i]-log(a_p f_z k_{c1.}))}{log(sin(\kappa)/f_z)}$
 ```{r definition of jags model to identify mc}
 cat("model{
 # log likelihood amplitud of cutting torque
@@ -266,10 +319,14 @@ kc1 ~ dnorm(m_kc,tau_kc)
 
 ```
 
+
 ```{r run jags model}
 jags_kienzle_mc <- jags(data_mill, inits, parameters, model.file="jags_kienzle_mc.txt", 
                       n.iter=5000, n.chains=20, n.burnin=1000)
 ```
+Once the actualized ditribution for $m_c$ we repeat another Gibbs Sampler is implemented to find an improved distribution for $k_{c1.1}$ using the new posterior distribution of $m_c$. This procedure is repeated until the both distributions are stabled.
+
+$k_{c1.1}[i] = \frac{M_c[i]}{(ap fz^{1-mc} sin(\kappa)^mc))}
 
 ```{r}
 data_mill_kc11 <- list("k" = length(dfMcMax$McMax), 

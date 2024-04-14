@@ -1,0 +1,37 @@
+---
+title: "supporting_fcn"
+output: html_document
+date: "2024-03-27"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+```
+
+## R Markdown
+this function calculates de value $\alpha$ and $\beta$ for a beta distribution given the mean value and a varianz
+```{r beta distribution alpha and beta by mean and varianz}
+beta_dist_param <- function(m, var){
+  alpha <- m^2*(1-m)/var - m
+  beta <- alpha * (1-m)/m
+  param <- data.frame(alpha, beta)
+  return(param)
+}
+
+
+beta_dist_mc <- beta_dist_param(0.25, 0.1^2)
+beta_dist_mc
+
+# test the result
+N <- 1000
+
+x = seq(0, 1, length.out=N)
+
+beta_init <- dbeta(x, beta_dist_mc$alpha, beta_dist_mc$beta)
+df <- data.frame(x = x, 
+                     beta_init = beta_init)
+ggplot(df, aes(x=x, y=beta_init)) +
+  geom_line()
+```
+
