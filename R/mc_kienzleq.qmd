@@ -272,6 +272,32 @@ ggplot(df, aes(x=x, y=beta_init_mc)) +
 ggplot(df, aes(x=xnorm, y=norm_init_kc)) +
   geom_line()
 ```
+new idea to calculate the posterior directly (after discussion with Dr. Muñoz)
+
+```{r}
+N <- length(dfMcMax$McMax)
+mc_sample <- rep(0, N)
+kc1_sample <- rep(0, N)
+ap <- 0.001  # cutting depth in m
+fz <- 0.00015 # feed per tooth in m
+kappa <- 105/180*pi # main angle of tool insert in degree
+z <- 4     # number of cutting edges [2, 3, 4]
+kc1 <- rnorm(1, 1200, 100)
+Mc <- dfMcMax$McMax
+for (k in 1:N){
+  mc_sample[k] <- (log(Mc[k]-log(ap*fz*kc1)))/(log(sin(kappa)/fz))
+}
+mc_mean <- mean(mc_sample)
+mc_sd <- sd(mc_sample)
+mc <- rnorm(1,mc_mean, mc_sd)
+for (k in 1:N){
+  kc1_sample[k] <- Mc[k]/((ap*(fz)^(1-mc))*sin(kappa)^mc)
+}
+
+
+```
+
+
 
 ```{r prep data for jags}
 ap = 0.001  # cutting depth in m
