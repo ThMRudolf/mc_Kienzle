@@ -1,8 +1,11 @@
 ---
 title: "Identification of cutting model parameters for a flat milling process"
 author: "Thomas M. Rudolf"
+email: "thomas.rudolf@itam.mx"
+affiliations: "Instituto Tecnológico Autónomo de México - ITAM"
 date: "2024-03-26"
-output: pdf_document
+format: pdf
+editor: visual
 ---
 
 #abstract\
