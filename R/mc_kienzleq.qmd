@@ -85,14 +85,15 @@ max_Mc <- function(id_reduce, Mc, phi){
   McMax <- NULL
   phiMcMax <- NULL
   for(k3 in id_reduce){
-      print(k3)
-      McMax <- append(McMax, max(Mc[k3_old:k3]))
-      print(last(McMax ))
-      print(Mc[k3_old:k3])
-    
-      ii <- which(McMax[idx]==Mc[k3_old:k3])
-      print(ii)
-      phiMcMax <- append(phiMcMax, phi[k3_old-1+ii[1]])
+      Mc_temp <- Mc[k3_old:k3]
+      phi_temp <- phi[k3_old:k3]
+      McMax <- append(McMax, max(Mc_temp))
+
+      ii <- which(McMax[idx]==Mc_temp)
+      #print(ii)
+      phiMcMax <- append(phiMcMax, phi_temp[ii[1]])
+      #print("angle:")
+      #print( phi_temp[ii[1]])
       k3_old <- k3
       idx <- idx+1
   }
@@ -125,20 +126,20 @@ if(ae>rtool){
   phi_out <- pi/2 + asin((ae-rtool)/rtool)
 }
 phi_in <- 0 
-phi <- omegaSpindle*time
-listPhi <-lim22pi(phi)
-phi <- listPhi[[1]]
+phi_sim <- omegaSpindle*time
+listPhi <-lim22pi(phi_sim)
+phi_sim <- listPhi[[1]]
 for(time_idx in 1:NSamples){
   for(cutting_edge_idx in 1:z){
-    sin_arg <- phi[time_idx] - ((2*pi)/z) * (cutting_edge_idx -1)
+    sin_arg <- phi_sim[time_idx] - ((2*pi)/z) * (cutting_edge_idx -1)
     add_sin_comp <- sin(sin_arg)
     cond <- (sin_arg >phi_in) && (sin_arg < phi_out)
     cum_sin_phi[time_idx] <- cum_sin_phi[time_idx] + ifelse(cond, add_sin_comp, 0)
   }
 }
 AmpMc <- ap*fz^(1-mc)*(sin(kappa)^mc)*kc11
-dfModelKienzle <- data.frame(t = time,  Mc = AmpMc*cum_sin_phi, phi)
-ggplot(dfModelKienzle, aes(x=phi, y=Mc)) +
+dfModelKienzle <- data.frame(t = time,  Mc = AmpMc*cum_sin_phi, phi_sim)
+ggplot(dfModelKienzle, aes(x=phi_sim, y=Mc)) +
   geom_line()
 
 ```
@@ -163,9 +164,9 @@ velSp <- process_mill$X..Nck..SD.nckServoDataActVelMot32..u1..4./36 * 0.1047198 
 time <- process_mill$time
 dtime <- diff(time)
 dtime <- append(dtime, 0.002)
-phi <-cumsum(velSp)*0.002
-df_phi <- lim22pi(phi)
-phi <- df_phi$
+phi_real <-cumsum(velSp)*0.002
+df_phi_real <- lim22pi(phi_real)
+phi_real <- df_phi_real[[1]]
 N <- length(iqSp)
 raund_count = 0
 km <- 1.3
@@ -175,7 +176,7 @@ df_plot_data_complete <- data.frame(iqSp = iqSp,
                                     velSp = velSp, 
                                     time = time, 
                                     dtime = dtime, 
-                                    phi = phi, 
+                                    phi = phi_real, 
                                     Mc = Mc)
 
 ggplot(df_plot_data_complete) + 
@@ -199,18 +200,19 @@ Since the amplitude is the relevant value to evaluate, the signals are analysed 
 id_reduce <- NULL
 
 
-#max_Mc
+# max_Mc
 # evaluation data in process: 4s to 13s
 eval_times <- c(4, 13)
 eval_idx <- which((time>=eval_times[1]) & (time<=eval_times[2]))
 df2EvalData <- data.frame(iqSp = iqSp[eval_idx], 
                           velSp = velSp[eval_idx],
                           time = time[eval_idx], 
-                          phi = phi[eval_idx], 
+                          phi = phi_real[eval_idx], 
                           Mc = Mc[eval_idx])
 
 
-dfMcMax <- max_Mc(id_reduce = eval_idx, Mc[eval_idx], phi[eval_idx])
+dfMcMax <- max_Mc(id_reduce = eval_idx, Mc[eval_idx], phi_real[eval_idx])
+dfMcMax_clean <- na.omit(dfMcMax)
 ```
 
 ```{r some nice plots}
@@ -231,8 +233,8 @@ ggplot(df_plots, aes(x = time, y = Mc)) +
 df_plots_arranged <- arrange(df_plots, phi, by_group = TRUE)
 
 ## max values of Mc
-dfMcMax <- dfMcMax |> mutate(mafMcMax=maf(McMax, 10))
-ggplot(dfMcMax, aes(x=phiMcMax, y=McMax))+
+dfMcMax_clean <- dfMcMax_clean |> mutate(mafMcMax=maf(McMax, 10))
+ggplot(dfMcMax_clean, aes(x=phiMcMax, y=McMax))+
   geom_line()+
   geom_line(aes(x=phiMcMax, y=mafMcMax), color="red")
 ```
@@ -285,10 +287,17 @@ fz <- 0.00015 # feed per tooth in m
 kappa <- 105/180*pi # main angle of tool insert in degree
 z <- 4     # number of cutting edges [2, 3, 4]
 kc1 <- rnorm(1, 1200, 100)
-Mc <- dfMcMax$McMax
+Mc <- dfMcMax_clean$McMax
+temp_counter = 0  
 for (k in 1:N){
-  mc_sample[k] <- (log(Mc[k]-log(ap*fz*kc1)))/(log(sin(kappa)/fz))
+  mc_sample[k] <- (log(Mc[k])-log(ap*fz*kc1))/(log(sin(kappa)/fz))
+  if(is.na(mc_sample[k])){
+    #print(k)
+    temp_counter=temp_counter+1
+  }
 }
+print(temp_counter)
+mc_sample <- na.omit(mc_sample)
 mc_mean <- mean(mc_sample)
 mc_sd <- sd(mc_sample)
 mc <- rnorm(1,mc_mean, mc_sd)
@@ -313,8 +322,8 @@ sd_kc = sd_kc
 
 
 
-data_mill <- list("k" = length(dfMcMax$McMax), 
-                  "Mc" = dfMcMax$McMax,
+data_mill <- list("k" = length(dfMcMax_clean$McMax), 
+                  "Mc" = dfMcMax_clean$McMax,
                   "ap" = ap, 
                   "fz" = fz, 
                   "kappa" = kappa, 
@@ -330,14 +339,14 @@ parameters <- c("mc", "mc_estim")
 
 the distribiution $m_c[i] f(m_c|k_{c1.1})$: the value for $k_{c1.1}$ is asummed as a normal distribution with the mentioned values as start values.
 
-$m_c[1] = \frac{log(Mc[i]-log(a_p f_z k_{c1.}))}{log(sin(\kappa)/f_z)}$
+$m_c[1] = \frac{log(Mc[i])-log(a_p f_z k_{c1.})}{log(sin(\kappa)/f_z)}$
 
 ```{r definition of jags model to identify mc}
 cat("model{
 # log likelihood amplitud of cutting torque
 for (i in 1:k){
     mc_estim[i] ~ dnorm(mc[i], tau_mc)
-    mc[i] <-  (log(Mc[i]-log(ap*fz*kc1)))/(log(sin(kappa)/fz))
+    mc[i] <-  (log(Mc[i])-log(ap*fz*kc1))/(log(sin(kappa)/fz))
 }
 tau_kc <- 1/pow(sd_kc,2)
 tau_mc <- 1/pow(sd_mc,2)
