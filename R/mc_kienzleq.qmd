@@ -85,9 +85,13 @@ max_Mc <- function(id_reduce, Mc, phi){
   McMax <- NULL
   phiMcMax <- NULL
   for(k3 in id_reduce){
+      print(k3)
       McMax <- append(McMax, max(Mc[k3_old:k3]))
+      print(last(McMax ))
+      print(Mc[k3_old:k3])
     
       ii <- which(McMax[idx]==Mc[k3_old:k3])
+      print(ii)
       phiMcMax <- append(phiMcMax, phi[k3_old-1+ii[1]])
       k3_old <- k3
       idx <- idx+1
@@ -96,7 +100,6 @@ max_Mc <- function(id_reduce, Mc, phi){
   return(df)
 }
 ```
-
 
 ```{r theoretical model by Kienzle}
 ap <- 1  # cutting depth in m
@@ -139,8 +142,6 @@ ggplot(dfModelKienzle, aes(x=phi, y=Mc)) +
   geom_line()
 
 ```
-
-
 
 The data are imported. The important signals are the torque generating current of the main spindle, the rotational velocity of the main spindle and the time. Based on this data the the toque and the angular position can be calculated.
 
@@ -209,7 +210,7 @@ df2EvalData <- data.frame(iqSp = iqSp[eval_idx],
                           Mc = Mc[eval_idx])
 
 
-dfMcMax <- max_Mc(id_reduce, Mc[eval_idx], phi[eval_idx])
+dfMcMax <- max_Mc(id_reduce = eval_idx, Mc[eval_idx], phi[eval_idx])
 ```
 
 ```{r some nice plots}
@@ -272,6 +273,7 @@ ggplot(df, aes(x=x, y=beta_init_mc)) +
 ggplot(df, aes(x=xnorm, y=norm_init_kc)) +
   geom_line()
 ```
+
 new idea to calculate the posterior directly (after discussion with Dr. Muñoz)
 
 ```{r}
@@ -296,8 +298,6 @@ for (k in 1:N){
 
 
 ```
-
-
 
 ```{r prep data for jags}
 ap = 0.001  # cutting depth in m
@@ -327,9 +327,11 @@ inits <- function(){list(mc=0.25, kc1=1.2e3)}
 parameters <- c("mc", "mc_estim")
 
 ```
-the distribiution $m_c[i] f(m_c|k_{c1.1})$: the value for $k_{c1.1}$ is asummed as a normal distribution with the mentioned  values as start values. 
+
+the distribiution $m_c[i] f(m_c|k_{c1.1})$: the value for $k_{c1.1}$ is asummed as a normal distribution with the mentioned values as start values.
 
 $m_c[1] = \frac{log(Mc[i]-log(a_p f_z k_{c1.}))}{log(sin(\kappa)/f_z)}$
+
 ```{r definition of jags model to identify mc}
 cat("model{
 # log likelihood amplitud of cutting torque
@@ -345,14 +347,14 @@ kc1 ~ dnorm(m_kc,tau_kc)
 
 ```
 
-
 ```{r run jags model}
 jags_kienzle_mc <- jags(data_mill, inits, parameters, model.file="jags_kienzle_mc.txt", 
                       n.iter=5000, n.chains=20, n.burnin=1000)
 ```
+
 Once the actualized ditribution for $m_c$ we repeat another Gibbs Sampler is implemented to find an improved distribution for $k_{c1.1}$ using the new posterior distribution of $m_c$. This procedure is repeated until the both distributions are stabled.
 
-$k_{c1.1}[i] = \frac{M_c[i]}{(ap fz^{1-mc} sin(\kappa)^mc))}
+\$k\_{c1.1}\[i\] = \frac{M_c[i]}{(ap fz^{1-mc} sin(\kappa)^mc))}
 
 ```{r}
 data_mill_kc11 <- list("k" = length(dfMcMax$McMax), 
