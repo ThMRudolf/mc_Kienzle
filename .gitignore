@@ -1,5 +1,27 @@
-R/.RData
-R/.Rhistory
+# History files
+.Rhistory
+.Rapp.history
+
+# Session Data files
+.RData
+.RDataTmp
+
+# User-specific files
+.Ruserdata
+
+# Example code in package build process
+*-Ex.R
+
+# Output files from R CMD build
+/*.tar.gz
+
+# Output files from R CMD check
+/*.Rcheck/
+
+# RStudio files
+.Rproj.user/
+
+# prject specific files
 R/COMPSTAT_Abstract_rdf.pdf
 R/jags_kienzle_kc11.txt
 R/jags_kienzle_mc.txt
