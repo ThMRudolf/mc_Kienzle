@@ -250,7 +250,7 @@ beta_dist_param <- function(m, var){
 }
 
 
-beta_dist_mc <- beta_dist_param(0.25, 0.1^2)
+beta_dist_mc <- beta_dist_param(0.30, 0.1^2)
 beta_dist_mc
 
 beta_dist_kc <- beta_dist_param(1200, 10^2)
@@ -325,34 +325,54 @@ sd_kc = sd_kc
 data_mill <- list("k" = length(dfMcMax_clean$McMax), 
                   "Mc" = dfMcMax_clean$McMax,
                   "ap" = ap, 
-                  "fz" = fz, 
+                  "fz" = fz,
+                  "rtool" = rtool,
                   "kappa" = kappa, 
                   "m_kc" = m_kc, 
-                  "sd_kc" = sd_kc,
-                  "sd_mc" = 0.1 
+                  "tau_kc" = 1/(sd_kc)^2,
+                  "alpha_mc" = beta_dist_mc$alpha,
+                  "beta_mc" = beta_dist_mc$beta
                   )
-inits <- function(){list(mc=0.25, kc1=1.2e3)}
+inits <- function(){list(mc=0.25, kc11=1.2e3)}
+#inits <- function(){list(mc=0.25)}
 #parameters <- c("mc", "kc1", "mc_estim", "kc1_estim")
-parameters <- c("mc", "mc_estim")
+parameters <- c("mc", "kc11")
 
 ```
 
-the distribiution $m_c[i] f(m_c|k_{c1.1})$: the value for $k_{c1.1}$ is asummed as a normal distribution with the mentioned values as start values.
+the distribiution $m_c[i] = f(m_c|k_{c1.1})$: the value for $k_{c1.1}$ is asummed as a normal distribution with the mentioned values as start values.
 
 $m_c[1] = \frac{log(Mc[i])-log(a_p f_z k_{c1.})}{log(sin(\kappa)/f_z)}$
 
-```{r definition of jags model to identify mc}
-cat("model{
-# log likelihood amplitud of cutting torque
-for (i in 1:k){
-    mc_estim[i] ~ dnorm(mc[i], tau_mc)
-    mc[i] <-  (log(Mc[i])-log(ap*fz*kc1))/(log(sin(kappa)/fz))
-}
-tau_kc <- 1/pow(sd_kc,2)
-tau_mc <- 1/pow(sd_mc,2)
-kc1 ~ dnorm(m_kc,tau_kc)
+```{r definition of jags model to identify mc and kc11}
+#cat("model{
+## log likelihood amplitud of cutting torque
+#for (i in 1:k){
+#    mc_estim[i] ~ dnorm(mc[i], tau_mc)
+#    mc[i] <-  (log(Mc[i])-log(ap*fz*kc1))/(log(sin(kappa)/fz))
+#}
+#tau_kc <- 1/pow(sd_kc,2)
+#tau_mc <- 1/pow(sd_mc,2)
+#kc1 ~ dnorm(m_kc,tau_kc)
+#
+#  } ", file="jags_kienzle_mc.txt")
 
-  } ", file="jags_kienzle_mc.txt")
+
+cat("model {
+    # Likelihood
+    for (i in 1:k) {
+        # Model equation
+        Mc[i] ~ dnorm(pred[i], tau)
+        pred[i] <- ap * fz^(1 - mc) * sin(kappa)^(mc) * kc11 * rtool
+    }
+
+    # Priors
+    kc11 ~ dnorm(m_kc, tau_kc)  # Normal prior with mean 1200 and precision 1/50^2
+    mc ~ dbeta(alpha_mc, beta_mc)      # Uniform prior between 0 and 1
+
+    # Precision for the normal distribution (tau = 1/variance)
+    tau ~ dgamma(0.1, 0.1) # Gamma prior for precision
+}", file="jags_kienzle_mc.txt")
 
 ```
 
@@ -395,6 +415,23 @@ beta_mc ~ dnorm(beta_mc, tau_mc)
 tau_kc <- 1/pow(sd_kc,2)
 
   } ", file="jags_kienzle_kc11.txt")
+
+
+model {
+    # Likelihood
+    for (i in 1:N) {
+        # Model equation
+        M[i] ~ dnorm(pred[i], tau)
+        pred[i] <- a_p[i] * f_z[i]^(1 - m_c) * sin_kappa[i]^(m_c) * k_c * k_c1_1[i] * r_tool[i]
+    }
+
+    # Priors
+    k_c ~ dnorm(0, 0.001)  # Normal prior with mean 0 and precision 0.001
+    m_c ~ dunif(0, 1)      # Uniform prior between 0 and 1
+
+    # Precision for the normal distribution (tau = 1/variance)
+    tau ~ dgamma(0.1, 0.1) # Gamma prior for precision
+}
 
 ```
 
