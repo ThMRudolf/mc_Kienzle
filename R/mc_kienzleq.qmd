@@ -250,10 +250,10 @@ beta_dist_param <- function(m, var){
 }
 
 
-beta_dist_mc <- beta_dist_param(0.30, 0.1^2)
+beta_dist_mc <- beta_dist_param(mc, 0.1^2)
 beta_dist_mc
 
-beta_dist_kc <- beta_dist_param(1200, 10^2)
+beta_dist_kc <- beta_dist_param(kc11, 10^2)
 beta_dist_kc
 
 # test the result
@@ -345,18 +345,6 @@ the distribiution $m_c[i] = f(m_c|k_{c1.1})$: the value for $k_{c1.1}$ is asumme
 $m_c[1] = \frac{log(Mc[i])-log(a_p f_z k_{c1.})}{log(sin(\kappa)/f_z)}$
 
 ```{r definition of jags model to identify mc and kc11}
-#cat("model{
-## log likelihood amplitud of cutting torque
-#for (i in 1:k){
-#    mc_estim[i] ~ dnorm(mc[i], tau_mc)
-#    mc[i] <-  (log(Mc[i])-log(ap*fz*kc1))/(log(sin(kappa)/fz))
-#}
-#tau_kc <- 1/pow(sd_kc,2)
-#tau_mc <- 1/pow(sd_mc,2)
-#kc1 ~ dnorm(m_kc,tau_kc)
-#
-#  } ", file="jags_kienzle_mc.txt")
-
 
 cat("model {
     # Likelihood
@@ -372,12 +360,12 @@ cat("model {
 
     # Precision for the normal distribution (tau = 1/variance)
     tau ~ dgamma(0.1, 0.1) # Gamma prior for precision
-}", file="jags_kienzle_mc.txt")
+}", file="jags_kienzle_McMax.txt")
 
 ```
 
 ```{r run jags model}
-jags_kienzle_mc <- jags(data_mill, inits, parameters, model.file="jags_kienzle_mc.txt", 
+jags_kienzle_mc <- jags(data_mill, inits, parameters, model.file="jags_kienzle_McMax.txt", 
                       n.iter=5000, n.chains=20, n.burnin=1000)
 ```
 
@@ -386,56 +374,54 @@ Once the actualized ditribution for $m_c$ we repeat another Gibbs Sampler is imp
 \$k\_{c1.1}\[i\] = \frac{M_c[i]}{(ap fz^{1-mc} sin(\kappa)^mc))}
 
 ```{r}
-data_mill_kc11 <- list("k" = length(dfMcMax$McMax), 
-                  "Mc" = dfMcMax$McMax,
+data_mill_cont <- list("k" = length(dfMcMax$McMax), 
+                  "Mc" = Mc,
+                  "phi"= phi_real,
                   "ap" = ap, 
-                  "fz" = fz, 
+                  "fz" = fz,
+                  "z"  = z,
+                  "rtool" = rtool,
                   "kappa" = kappa, 
-                  "alpha_mc" = alpha_mc, 
-                  "beta_mc" = beta_mc, 
-                  "sd_kc" = sd_kc
+                  "m_kc" = m_kc, 
+                  "tau_kc" = 1/(sd_kc)^2,
+                  "alpha_mc" = beta_dist_mc$alpha,
+                  "beta_mc" = beta_dist_mc$beta
                   )
 inits_kc11 <- function(){list(mc=0.25, kc1=1.2e3)}
 #parameters <- c("mc", "kc1", "mc_estim", "kc1_estim")
-parameters_kc11 <- c("ddd")    #c("kc1", "kc_estim")
+parameters_kc11 <- c("kc1", "kc_estim")
 ```
 
 ```{r definition of jags model to identify kc11}
-cat("model{
-# log likelihood amplitud of cutting torque
-for (i in 1:k){
-    kc_estim[i] ~ dnorm(kc1[i], tau_kc)
-    kc1[i] <- Mc[i]/(ap*pow(fz, (1-mc))*pow(sin(kappa), mc))
-  }
-mc ~ dbeta(alpha_mc, beta_mc)
-sd_mc <- 0.1
-tau_mc <- 1/pow(sd_mc, 2)
-alpha_mc  ~ dnorm(alpha_mc, tau_mc)
-beta_mc ~ dnorm(beta_mc, tau_mc)
-tau_kc <- 1/pow(sd_kc,2)
-
-  } ", file="jags_kienzle_kc11.txt")
-
-
-model {
+cat("model {
     # Likelihood
-    for (i in 1:N) {
+    for (i in 1:k) {
         # Model equation
-        M[i] ~ dnorm(pred[i], tau)
-        pred[i] <- a_p[i] * f_z[i]^(1 - m_c) * sin_kappa[i]^(m_c) * k_c * k_c1_1[i] * r_tool[i]
+        Mc[i] ~ dnorm(pred[i], tau)
+        sin_sum_indiv <- 0 # inicial sum
+        for (j in 1:z){
+            sin_val <-  sin(phi[i] + (j-1)*2*3.141593/z) #
+            sin_sum_indiv <- sin_sum_indiv + pow(sin_val, (1-mc))     
+        }
+        sin_sum[i] <- sin_sum_indiv
+        pred[i] <- (ap * pow(fz, (1 - mc)) * pow(sin(kappa), (mc)) * kc11 * rtool)*sin_sum[i]
     }
 
     # Priors
-    k_c ~ dnorm(0, 0.001)  # Normal prior with mean 0 and precision 0.001
-    m_c ~ dunif(0, 1)      # Uniform prior between 0 and 1
+    kc11 ~ dnorm(m_kc, tau_kc)  # Normal prior with mean 1200 and precision 1/50^2
+    mc ~ dbeta(alpha_mc, beta_mc)      # Uniform prior between 0 and 1
 
     # Precision for the normal distribution (tau = 1/variance)
     tau ~ dgamma(0.1, 0.1) # Gamma prior for precision
-}
+
+}", file="jags_kienzle_cont.txt")
+
+
+
 
 ```
 
 ```{r run jags model for kc11}
-jags_kienzle_kc11 <- jags(data_mill_kc11, inits_kc11, parameters_kc11, model.file="jags_kienzle_kc11.txt", 
+jags_kienzle_kc11 <- jags(data_mill_cont, inits_kc11, parameters_kc11, model.file="jags_kienzle_cont.txt", 
                       n.iter=5000, n.chains=20, n.burnin=1000)
 ```
