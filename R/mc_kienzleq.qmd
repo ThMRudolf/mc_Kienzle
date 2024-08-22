@@ -287,7 +287,7 @@ fz <- 0.00015 # feed per tooth in m
 kappa <- 105/180*pi # main angle of tool insert in degree
 z <- 4     # number of cutting edges [2, 3, 4]
 kc1 <- rnorm(1, 1200, 100)
-Mc <- dfMcMax_clean$McMax
+McMax <- dfMcMax_clean$McMax
 temp_counter = 0  
 for (k in 1:N){
   mc_sample[k] <- (log(Mc[k])-log(ap*fz*kc1))/(log(sin(kappa)/fz))
@@ -374,9 +374,9 @@ Once the actualized ditribution for $m_c$ we repeat another Gibbs Sampler is imp
 \$k\_{c1.1}\[i\] = \frac{M_c[i]}{(ap fz^{1-mc} sin(\kappa)^mc))}
 
 ```{r}
-data_mill_cont <- list("k" = length(dfMcMax$McMax), 
+data_mill_cont <- list("k" = length(Mc), 
                   "Mc" = Mc,
-                  "phi"= phi_real,
+                  "phi"= abs(phi_real),
                   "ap" = ap, 
                   "fz" = fz,
                   "z"  = z,
@@ -387,26 +387,31 @@ data_mill_cont <- list("k" = length(dfMcMax$McMax),
                   "alpha_mc" = beta_dist_mc$alpha,
                   "beta_mc" = beta_dist_mc$beta
                   )
-inits_kc11 <- function(){list(mc=0.25, kc1=1.2e3)}
+inits_cont <- function(){list(mc=0.25, kc11=1.2e3)}
 #parameters <- c("mc", "kc1", "mc_estim", "kc1_estim")
-parameters_kc11 <- c("kc1", "kc_estim")
+parameters_cont <- c("kc11", "mc")
 ```
+
+![](images/clipboard-9133593.png)
 
 ```{r definition of jags model to identify kc11}
 cat("model {
+
+    pi <- 3.141593
     # Likelihood
     for (i in 1:k) {
+        # calculate the prediction
+        sin_sum[i] <- pow(sin(phi[i]), 1 - mc) + 
+          pow(sin(phi[i] + 2 * pi / z), 1 - mc) + 
+          pow(sin(phi[i] + 4 * pi / z), 1 - mc) +    
+          pow(sin(phi[i] + 6 * pi / z), 1 - mc)
+        
+        pred[i] <- (ap * pow(fz, (1 - mc)) * pow(sin(kappa), mc) * kc11 * rtool) * sin_sum[i]
+        
         # Model equation
         Mc[i] ~ dnorm(pred[i], tau)
-        sin_sum_indiv <- 0 # inicial sum
-        for (j in 1:z){
-            sin_val <-  sin(phi[i] + (j-1)*2*3.141593/z) #
-            sin_sum_indiv <- sin_sum_indiv + pow(sin_val, (1-mc))     
-        }
-        sin_sum[i] <- sin_sum_indiv
-        pred[i] <- (ap * pow(fz, (1 - mc)) * pow(sin(kappa), (mc)) * kc11 * rtool)*sin_sum[i]
     }
-
+    
     # Priors
     kc11 ~ dnorm(m_kc, tau_kc)  # Normal prior with mean 1200 and precision 1/50^2
     mc ~ dbeta(alpha_mc, beta_mc)      # Uniform prior between 0 and 1
@@ -422,6 +427,6 @@ cat("model {
 ```
 
 ```{r run jags model for kc11}
-jags_kienzle_kc11 <- jags(data_mill_cont, inits_kc11, parameters_kc11, model.file="jags_kienzle_cont.txt", 
+jags_kienzle_cont <- jags(data_mill_cont, inits_cont, parameters_cont, model.file="jags_kienzle_cont.txt", 
                       n.iter=5000, n.chains=20, n.burnin=1000)
 ```
