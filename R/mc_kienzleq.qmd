@@ -108,7 +108,7 @@ fz <- 0.15 # feed per tooth in m
 kappa <- 105/180*pi # main angle of tool insert in degree
 z <- 4     # number of cutting edges [2, 3, 4]
 rtool <- 40/2# tool radius in m
-mc <- 0.25
+mc <- 0.3
 kc11 <- 1200
 ae <- 30
 SSpinlde <- 2109 # spindle speed in rpm
@@ -376,7 +376,7 @@ Once the actualized ditribution for $m_c$ we repeat another Gibbs Sampler is imp
 ```{r}
 data_mill_cont <- list("k" = length(Mc), 
                   "Mc" = Mc,
-                  "phi"= abs(phi_real),
+                  "phi"= (phi_real),
                   "ap" = ap, 
                   "fz" = fz,
                   "z"  = z,
@@ -401,12 +401,19 @@ cat("model {
     # Likelihood
     for (i in 1:k) {
         # calculate the prediction
-        sin_sum[i] <- pow(sin(phi[i]), 1 - mc) + 
-          pow(sin(phi[i] + 2 * pi / z), 1 - mc) + 
-          pow(sin(phi[i] + 4 * pi / z), 1 - mc) +    
-          pow(sin(phi[i] + 6 * pi / z), 1 - mc)
+        #a1[i] <- sin(phi[i] + 2 * pi / z)
+        #a2[i] <- sin(phi[i] + 4 * pi / z)
+        #a3[i] <- sin(phi[i] + 6 * pi / z)
+        #sin_sum[i] <- pow(sin(phi[i]), 1 - mc) + 
+        #  pow(a1[i], 1 - mc) + 
+        #  pow(a2[i], 1 - mc) +    
+        #  pow(a3[i], 1 - mc)
+        sin_sum[1] <- pow(sin(phi[i]), 1-mc)
+        for (j in 2:z){
+              sin_sum[j] <-  sin_sum[j-1] + pow(sin(phi[i] + (j-1)*2 * pi / z), 1-mc)
+        }
         
-        pred[i] <- (ap * pow(fz, (1 - mc)) * pow(sin(kappa), mc) * kc11 * rtool) * sin_sum[i]
+        pred[i] <- (ap * pow(fz, (1 - mc)) * pow(sin(kappa), mc) * kc11 * rtool) * sin_sum[z]
         
         # Model equation
         Mc[i] ~ dnorm(pred[i], tau)
