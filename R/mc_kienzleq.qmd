@@ -171,6 +171,7 @@ N <- length(iqSp)
 raund_count = 0
 km <- 1.3
 Mc <- iqSp * km
+Mc_real4STAN <- iqSp * km
 
 df_plot_data_complete <- data.frame(iqSp = iqSp, 
                                     velSp = velSp, 
@@ -392,7 +393,6 @@ inits_cont <- function(){list(mc=0.25, kc11=1.2e3)}
 parameters_cont <- c("kc11", "mc")
 ```
 
-![](images/clipboard-9133593.png)
 
 ```{r definition of jags model to identify kc11}
 cat("model {
@@ -437,3 +437,89 @@ cat("model {
 jags_kienzle_cont <- jags(data_mill_cont, inits_cont, parameters_cont, model.file="jags_kienzle_cont.txt", 
                       n.iter=5000, n.chains=20, n.burnin=1000)
 ```
+
+
+New intent with STAN model
+import relevant libs
+
+```{r setup, echo=FALSE, message=FALSE, warning=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(gt)
+library(ggplot2)
+library(rstan)
+library(rstantools)
+library(bayesplot)
+library(cmdstanr)
+library(gt)
+library(patchwork)
+library(tidyverse)
+```
+
+```{r data for STAN model}
+STAN_data_mill_cont <- list(k = length(Mc_real4STAN), 
+                  Mc = Mc_real4STAN,
+                  phi = (phi_real),
+                  ap = ap, 
+                  fz = fz,
+                  z  = z,
+                  rtool = rtool,
+                  kappa = kappa, 
+                  m_kc = m_kc, 
+                  tau_kc = 1/(sd_kc)^2,
+                  alpha_mc = beta_dist_mc$alpha,
+                  beta_mc = beta_dist_mc$beta
+                  )
+
+```
+
+
+```{stan, output.var="STAN_kienzle_cont"}
+
+data { 
+    int<lower=0> k;        // number of data points
+    int<lower=0> z;        // number of cutting teeth
+    real<lower=0> fz;      // feed per tooth
+    real<lower=0> ap;      // cutting depth
+    real<lower=0> rtool;   // tool radius
+    real<lower=0> m_kc;    // prior mean for kc11
+    real<lower=0> alpha_mc; // alpha parameter for beta prior of mc
+    real<lower=0> beta_mc;  // beta parameter for beta prior of mc
+    real<lower=0> Mc[k];   // observed cutting torque
+    real<lower=0, upper=2*pi()> phi[k];           // observed cutting tooth position
+    real<lower=0> kappa;   // cutting tool angle
+} 
+
+parameters { 
+    real<lower=0> kc11;    // parameter kc11 for normal distribution
+    real<lower=0, upper=1> mc; //  exponente mc (parameter for beta distribution)
+    real<lower=0> tau;     // precision parameter for normal distribution
+} 
+
+model { 
+    // Priors
+    kc11 ~ normal(m_kc, 50);     // Normal prior for kc11 with standard deviation 50
+    mc ~ beta(alpha_mc, beta_mc); // Beta prior for mc
+    tau ~ gamma(0.1, 0.1);        // Gamma prior for tau
+    
+    // Likelihood
+    for (i in 1:k) {
+        real sin_sum = 0;
+        for (j in 1:z) {
+            sin_sum += pow(sin(phi[i] + (j - 1) * 2 * pi() / z), 1 - mc);
+        }
+        
+        real pred = (ap * pow(fz, (1 - mc)) * pow(sin(kappa), mc) * kc11 * rtool) * sin_sum;
+        
+        Mc[i] ~ normal(pred, 1 / sqrt(tau));  // Normal likelihood with precision tau
+    }
+}
+
+
+```
+
+```{r fit_STAN_kienzle_cont}
+model_fit <- rstan::sampling(STAN_kienzle_cont, 
+                             data = STAN_data_mill_cont,
+                             refresh = 0)
+```
+
