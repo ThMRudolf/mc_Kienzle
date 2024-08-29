@@ -103,14 +103,16 @@ max_Mc <- function(id_reduce, Mc, phi){
 ```
 
 ```{r theoretical model by Kienzle}
-ap <- 1  # cutting depth in m
-fz <- 0.15 # feed per tooth in m
+ap <- 1/1000  # cutting depth in m
+fz <- 0.15/1000 # feed per tooth in m
 kappa <- 105/180*pi # main angle of tool insert in degree
 z <- 4     # number of cutting edges [2, 3, 4]
-rtool <- 40/2# tool radius in m
-mc <- 0.3
-kc11 <- 1200
-ae <- 30
+rtool <- 0.040/2# tool radius in m
+mc <- 0.23
+
+kc11 <- (2306-977*0)*1e6
+
+ae <- 0.75*rtool
 SSpinlde <- 2109 # spindle speed in rpm
 omegaSpindle <- SSpinlde/60*2*pi # spindle speed in rad/s
 dt <- 0.0002
@@ -205,11 +207,34 @@ id_reduce <- NULL
 # evaluation data in process: 4s to 13s
 eval_times <- c(4, 13)
 eval_idx <- which((time>=eval_times[1]) & (time<=eval_times[2]))
-df2EvalData <- data.frame(iqSp = iqSp[eval_idx], 
+
+# machine and friction effects
+no_load_times <- c(0, 2.0)
+no_load_idx <- which((time>=no_load_times[1]) & (time<=no_load_times[2]))
+
+# correct current and resulting torque
+no_load_mean_iq <- mean(iqSp[no_load_idx])
+no_load_mean_Mc <- mean(Mc[no_load_idx])
+# plot again with correction
+df_plot_data_complete <- mutate(df_plot_data_complete, iqSp_corrected = iqSp - no_load_mean_iq, 
+                                Mc_corrected = Mc - no_load_mean_Mc) 
+
+ggplot(df_plot_data_complete) + 
+  geom_line(aes(x = time, y = iqSp_corrected)) + 
+  geom_line(aes(x = time, y = maf(iqSp_corrected, 14), colour="current"))
+
+
+ggplot(df_plot_data_complete) + 
+  geom_line(aes(x = time, y = Mc_corrected)) + 
+  geom_line(aes(x = time, y = maf(Mc_corrected, 14), colour="torque"))
+
+                     
+# data to be analyesed
+df2EvalData <- data.frame(iqSp = iqSp[eval_idx]-no_load_mean_iq, 
                           velSp = velSp[eval_idx],
                           time = time[eval_idx], 
                           phi = phi_real[eval_idx], 
-                          Mc = Mc[eval_idx])
+                          Mc = Mc[eval_idx]-no_load_mean_Mc)
 
 
 dfMcMax <- max_Mc(id_reduce = eval_idx, Mc[eval_idx], phi_real[eval_idx])
@@ -251,30 +276,32 @@ beta_dist_param <- function(m, var){
 }
 
 
-beta_dist_mc <- beta_dist_param(mc, 0.1^2)
+beta_dist_mc <- beta_dist_param(mc, 0.02^2)
 beta_dist_mc
 
-beta_dist_kc <- beta_dist_param(kc11, 10^2)
+beta_dist_kc <- beta_dist_param(kc11, 977^2)
 beta_dist_kc
 
 # test the result
 N <- 1000
 
 x = seq(0, 1, length.out=N)
-xnorm = seq(200, 2000, length.out=N)
-m_kc <- 1200
-sd_kc <- 50
+xnorm = seq(0, 6000, length.out=N)
+m_kc <- 2306
+sd_kc <- 977
 beta_init_mc <- dbeta(x, beta_dist_mc$alpha, beta_dist_mc$beta)
 norm_init_kc <- dnorm(xnorm, m_kc, sd_kc)
-df <- data.frame(x = x,
+df_prior_dist <- data.frame(x = x,
                  xnorm = xnorm,
                  beta_init_mc = beta_init_mc,
                  norm_init_kc = norm_init_kc)
 
-ggplot(df, aes(x=x, y=beta_init_mc)) +
+g_mc <- ggplot(df_prior_dist, aes(x=x, y=beta_init_mc)) +
   geom_line()
-ggplot(df, aes(x=xnorm, y=norm_init_kc)) +
+g_mc
+g_kc <- ggplot(df_prior_dist, aes(x=xnorm, y=norm_init_kc)) +
   geom_line()
+g_kc
 ```
 
 new idea to calculate the posterior directly (after discussion with Dr. Muñoz)
@@ -287,11 +314,11 @@ ap <- 0.001  # cutting depth in m
 fz <- 0.00015 # feed per tooth in m
 kappa <- 105/180*pi # main angle of tool insert in degree
 z <- 4     # number of cutting edges [2, 3, 4]
-kc1 <- rnorm(1, 1200, 100)
-McMax <- dfMcMax_clean$McMax
+kc1 <- rnorm(1, kc11*1e6, 977e6)
+McMax <- dfMcMax_clean$McMax - no_load_mean_Mc
 temp_counter = 0  
 for (k in 1:N){
-  mc_sample[k] <- (log(Mc[k])-log(ap*fz*kc1))/(log(sin(kappa)/fz))
+  mc_sample[k] <- (log(McMax[k])-log(rtool*ap*fz*kc1*sin(kappa)))/(log(sin(kappa)*fz))
   if(is.na(mc_sample[k])){
     #print(k)
     temp_counter=temp_counter+1
@@ -303,9 +330,9 @@ mc_mean <- mean(mc_sample)
 mc_sd <- sd(mc_sample)
 mc <- rnorm(1,mc_mean, mc_sd)
 for (k in 1:N){
-  kc1_sample[k] <- Mc[k]/((ap*(fz)^(1-mc))*sin(kappa)^mc)
+  kc1_sample[k] <- Mc[k] / (rtool*ap*(fz)^(1-mc)*sin(kappa)^(1-mc))
 }
-
+#df_manual <- data.frame(mc_sample, kc1_sample)
 
 ```
 
@@ -325,8 +352,8 @@ sd_kc = sd_kc
 
 data_mill <- list("k" = length(dfMcMax_clean$McMax), 
                   "Mc" = dfMcMax_clean$McMax,
-                  "ap" = ap, 
-                  "fz" = fz,
+                  "ap" = ap*1000, 
+                  "fz" = fz*1000,
                   "rtool" = rtool,
                   "kappa" = kappa, 
                   "m_kc" = m_kc, 
@@ -352,7 +379,8 @@ cat("model {
     for (i in 1:k) {
         # Model equation
         Mc[i] ~ dnorm(pred[i], tau)
-        pred[i] <- ap * fz^(1 - mc) * sin(kappa)^(mc) * kc11 * rtool
+        #pred[i] <- ap * fz^(1 - mc) * sin(kappa)^(mc) * kc11 * rtool
+        log(pred[i]) <- log(ap) + (1 - mc)* log(fz) + (1-mc)*log(sin(kappa)) +log(kc11) +log( rtool) 
     }
 
     # Priors
@@ -366,8 +394,39 @@ cat("model {
 ```
 
 ```{r run jags model}
-jags_kienzle_mc <- jags(data_mill, inits, parameters, model.file="jags_kienzle_McMax.txt", 
+jags_kienzle_McMax <- jags(data_mill, inits, parameters, model.file="jags_kienzle_McMax.txt", 
                       n.iter=5000, n.chains=20, n.burnin=1000)
+```
+
+```{r jags model evaluation and results printing}
+ mc_post_mean <- jags_kienzle_McMax$BUGSoutput$mean$mc
+mc_post_sd<- jags_kienzle_McMax$BUGSoutput$sd$mc
+mc_deviance <- jags_kienzle_McMax$BUGSoutput$mean$deviance
+
+mc_post_beta <- beta_dist_param(mc_post_mean, mc_post_sd^2)
+beta_post_mc <- dbeta(x, mc_post_beta$alpha, mc_post_beta$beta)
+
+df_prior_dist <- mutate(df_prior_dist,beta_post_mc)
+g_mc <- g_mc +  geom_line(aes(x=x, y=beta_post_mc), color="red")
+g_mc
+
+
+kc11_post_mean <- jags_kienzle_McMax$BUGSoutput$mean$kc11
+kc11_post_sd <- jags_kienzle_McMax$BUGSoutput$sd$kc11
+
+norm_post_kc <- dnorm(xnorm, kc11_post_mean, kc11_post_sd)
+df_prior_dist <- mutate(df_prior_dist, norm_post_kc)
+g_kc <- g_kc + geom_line(aes(x=xnorm, y=norm_post_kc), color="red")
+g_kc
+
+df_print <- data.frame(mc_post_mean,
+                       mc_post_sd,
+                       kc11_post_mean, 
+                       kc11_post_sd, 
+                       mc_alpha_post = mc_post_beta$alpha, 
+                       mc_beta_post = mc_post_beta$beta) |>  gt()
+df_print
+
 ```
 
 Once the actualized ditribution for $m_c$ we repeat another Gibbs Sampler is implemented to find an improved distribution for $k_{c1.1}$ using the new posterior distribution of $m_c$. This procedure is repeated until the both distributions are stabled.
@@ -392,7 +451,6 @@ inits_cont <- function(){list(mc=0.25, kc11=1.2e3)}
 #parameters <- c("mc", "kc1", "mc_estim", "kc1_estim")
 parameters_cont <- c("kc11", "mc")
 ```
-
 
 ```{r definition of jags model to identify kc11}
 cat("model {
@@ -438,9 +496,7 @@ jags_kienzle_cont <- jags(data_mill_cont, inits_cont, parameters_cont, model.fil
                       n.iter=5000, n.chains=20, n.burnin=1000)
 ```
 
-
-New intent with STAN model
-import relevant libs
+New intent with STAN model import relevant libs
 
 ```{r setup, echo=FALSE, message=FALSE, warning=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
@@ -472,7 +528,6 @@ STAN_data_mill_cont <- list(k = length(Mc_real4STAN),
 
 ```
 
-
 ```{stan, output.var="STAN_kienzle_cont"}
 
 data { 
@@ -484,9 +539,10 @@ data {
     real<lower=0> m_kc;    // prior mean for kc11
     real<lower=0> alpha_mc; // alpha parameter for beta prior of mc
     real<lower=0> beta_mc;  // beta parameter for beta prior of mc
-    real<lower=0> Mc[k];   // observed cutting torque
+    real Mc[k];            // observed cutting torque
     real<lower=0, upper=2*pi()> phi[k];           // observed cutting tooth position
     real<lower=0> kappa;   // cutting tool angle
+    
 } 
 
 parameters { 
@@ -499,7 +555,7 @@ model {
     // Priors
     kc11 ~ normal(m_kc, 50);     // Normal prior for kc11 with standard deviation 50
     mc ~ beta(alpha_mc, beta_mc); // Beta prior for mc
-    tau ~ gamma(0.1, 0.1);        // Gamma prior for tau
+    tau ~ gamma(0.5, 0.5);        // Gamma prior for tau
     
     // Likelihood
     for (i in 1:k) {
@@ -522,4 +578,3 @@ model_fit <- rstan::sampling(STAN_kienzle_cont,
                              data = STAN_data_mill_cont,
                              refresh = 0)
 ```
-
