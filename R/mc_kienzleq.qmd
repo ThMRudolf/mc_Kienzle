@@ -399,7 +399,7 @@ jags_kienzle_McMax <- jags(data_mill, inits, parameters, model.file="jags_kienzl
 ```
 
 ```{r jags model evaluation and results printing}
- mc_post_mean <- jags_kienzle_McMax$BUGSoutput$mean$mc
+mc_post_mean <- jags_kienzle_McMax$BUGSoutput$mean$mc
 mc_post_sd<- jags_kienzle_McMax$BUGSoutput$sd$mc
 mc_deviance <- jags_kienzle_McMax$BUGSoutput$mean$deviance
 
